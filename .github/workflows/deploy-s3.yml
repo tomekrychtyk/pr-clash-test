@@ -39,7 +39,6 @@ jobs:
       url: https://${{ secrets.STAGING_S3_BUCKET }}.s3.${{ secrets.AWS_REGION }}.amazonaws.com/index.html
     
     steps:
-      - name: Approval checkpoint
         run: |
           echo "🚀 Staging deployment completed successfully!"
           echo "📋 Manual approval required to proceed to production deployment."
