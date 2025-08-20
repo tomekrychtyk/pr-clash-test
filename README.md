@@ -15,6 +15,7 @@ The deployment process consists of three stages:
 ### 1. Create S3 Buckets
 
 Create two S3 buckets in your AWS account:
+
 - One for staging (e.g., `my-app-staging`)
 - One for production (e.g., `my-app-production`)
 
@@ -25,19 +26,26 @@ Make sure both buckets are configured for static website hosting if you want to 
 Go to your GitHub repository settings → Secrets and variables → Actions, and add the following secrets:
 
 #### Required Secrets:
+
 - `AWS_ACCESS_KEY_ID` - Your AWS access key ID
 - `AWS_SECRET_ACCESS_KEY` - Your AWS secret access key
 - `AWS_REGION` - Your AWS region (e.g., `us-east-1`)
 - `STAGING_S3_BUCKET` - Name of your staging S3 bucket
 - `PRODUCTION_S3_BUCKET` - Name of your production S3 bucket
 
-### 3. Set up Production Environment
+### 3. Set up Production Environment (CRITICAL for Manual Approval)
 
-1. Go to your GitHub repository settings → Environments
-2. Create a new environment called `production`
-3. Add protection rules:
-   - ✅ Required reviewers (add yourself or team members)
-   - Optionally set wait timer if desired
+This step is **essential** for the manual approval to work:
+
+1. Go to your GitHub repository **Settings** → **Environments**
+2. Click **New environment**
+3. Name it exactly `production`
+4. Configure protection rules:
+   - ✅ **Required reviewers** - Add yourself and/or team members who can approve deployments
+   - ✅ **Prevent self-review** (optional but recommended)
+   - Optionally set **Wait timer** if you want a minimum delay
+
+**Without this setup, the workflow will not pause for approval!**
 
 ### 4. AWS IAM Permissions
 
@@ -45,32 +53,30 @@ Make sure your AWS user has the following permissions for both S3 buckets:
 
 ```json
 {
-    "Version": "2012-10-17",
-    "Statement": [
-        {
-            "Effect": "Allow",
-            "Action": [
-                "s3:PutObject",
-                "s3:PutObjectAcl",
-                "s3:GetObject",
-                "s3:DeleteObject"
-            ],
-            "Resource": [
-                "arn:aws:s3:::your-staging-bucket/*",
-                "arn:aws:s3:::your-production-bucket/*"
-            ]
-        },
-        {
-            "Effect": "Allow",
-            "Action": [
-                "s3:ListBucket"
-            ],
-            "Resource": [
-                "arn:aws:s3:::your-staging-bucket",
-                "arn:aws:s3:::your-production-bucket"
-            ]
-        }
-    ]
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:PutObject",
+        "s3:PutObjectAcl",
+        "s3:GetObject",
+        "s3:DeleteObject"
+      ],
+      "Resource": [
+        "arn:aws:s3:::your-staging-bucket/*",
+        "arn:aws:s3:::your-production-bucket/*"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["s3:ListBucket"],
+      "Resource": [
+        "arn:aws:s3:::your-staging-bucket",
+        "arn:aws:s3:::your-production-bucket"
+      ]
+    }
+  ]
 }
 ```
 
@@ -89,10 +95,29 @@ Make sure your AWS user has the following permissions for both S3 buckets:
 
 ## Manual Approval Process
 
-1. Go to your repository's Actions tab
-2. Click on the running workflow
-3. You'll see a "Review deployments" button for the production environment
-4. Click it and approve the deployment to production
+1. **After staging deployment completes:**
+
+   - Go to your repository's **Actions** tab
+   - Click on the running workflow
+   - You'll see the workflow is paused at "Wait for Manual Approval"
+
+2. **Review the staging deployment:**
+
+   - The workflow will show a staging URL in the logs
+   - Click the URL to review the deployed site
+   - Test that everything works as expected
+
+3. **Approve for production:**
+
+   - In the workflow page, you'll see a yellow **"Review deployments"** button
+   - Click it to see the approval dialog
+   - You can add a comment (optional)
+   - Click **"Approve and deploy"** to proceed to production
+   - Or click **"Reject"** to stop the deployment
+
+4. **After approval:**
+   - The production deployment will automatically start
+   - You'll get the production URL in the final step logs
 
 ## File Structure
 
