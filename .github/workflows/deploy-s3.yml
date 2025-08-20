@@ -30,7 +30,7 @@ jobs:
         run: |
           echo "🌐 Staging URL: https://${{ secrets.STAGING_S3_BUCKET }}.s3.${{ secrets.AWS_REGION }}.amazonaws.com/index.html"
 
-    wait-for-approval:
+  wait-for-approval:
     name: Wait for Manual Approval
     runs-on: ubuntu-latest
     needs: deploy-staging
