@@ -5,6 +5,11 @@ on:
     branches:
       - main
 
+# Prevent concurrent deployments but don't cancel in-progress ones
+concurrency:
+  group: s3-deployment
+  cancel-in-progress: true
+
 jobs:
   deploy-staging:
     name: Deploy to Staging S3
@@ -25,6 +30,24 @@ jobs:
         run: |
           aws s3 cp index.html s3://${{ secrets.STAGING_S3_BUCKET }}/index.html
           echo "✅ Successfully deployed to staging bucket: ${{ secrets.STAGING_S3_BUCKET }}"
+
+      - name: Store deployment metadata
+        run: |
+          # Create deployment metadata
+          DEPLOYMENT_INFO=$(cat << EOF
+          {
+            "workflow_id": "${{ github.run_id }}",
+            "sha": "${{ github.sha }}",
+            "timestamp": $(date +%s),
+            "workflow_run_number": ${{ github.run_number }},
+            "actor": "${{ github.actor }}",
+            "ref": "${{ github.ref }}"
+          }
+          EOF
+          )
+
+          echo "$DEPLOYMENT_INFO" | aws s3 cp - s3://${{ secrets.STAGING_S3_BUCKET }}/deployment-metadata.json
+          echo "📝 Stored deployment metadata for workflow ${{ github.run_id }}"
 
       - name: Output staging URL
         run: |
@@ -53,6 +76,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Need full history for git comparisons
 
       - name: Configure AWS credentials for production
         uses: aws-actions/configure-aws-credentials@v4
@@ -61,10 +86,70 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
+      - name: Validate deployment freshness
+        run: |
+          echo "🔍 Checking if this deployment is stale..."
+
+          CURRENT_SHA="${{ github.sha }}"
+          CURRENT_WORKFLOW_ID="${{ github.run_id }}"
+          CURRENT_TIMESTAMP=$(date +%s)
+
+          # Check if there's already deployment metadata in production
+          if aws s3 cp s3://${{ secrets.PRODUCTION_S3_BUCKET }}/deployment-metadata.json - 2>/dev/null > prod_metadata.json; then
+            echo "📋 Found existing production deployment metadata"
+            
+            PROD_SHA=$(cat prod_metadata.json | jq -r '.sha // empty')
+            PROD_WORKFLOW_ID=$(cat prod_metadata.json | jq -r '.workflow_id // empty')
+            PROD_TIMESTAMP=$(cat prod_metadata.json | jq -r '.timestamp // empty')
+            
+            echo "Current deployment: SHA=$CURRENT_SHA, Workflow=$CURRENT_WORKFLOW_ID"
+            echo "Production deployment: SHA=$PROD_SHA, Workflow=$PROD_WORKFLOW_ID"
+            
+            # Check if current commit is older than production commit
+            if [ ! -z "$PROD_SHA" ] && [ "$PROD_SHA" != "$CURRENT_SHA" ]; then
+              git fetch origin
+              if git merge-base --is-ancestor $CURRENT_SHA $PROD_SHA 2>/dev/null; then
+                echo "❌ ERROR: This deployment (SHA: $CURRENT_SHA) is older than what's currently in production (SHA: $PROD_SHA)"
+                echo "🚫 Deployment blocked to prevent overwriting newer changes"
+                exit 1
+              fi
+            fi
+            
+            # Check if this workflow is older than the production one
+            if [ ! -z "$PROD_WORKFLOW_ID" ] && [ "$PROD_WORKFLOW_ID" -gt "$CURRENT_WORKFLOW_ID" ]; then
+              echo "❌ ERROR: This workflow ($CURRENT_WORKFLOW_ID) is older than the one currently in production ($PROD_WORKFLOW_ID)"
+              echo "🚫 Deployment blocked to prevent overwriting newer changes"
+              exit 1
+            fi
+          else
+            echo "ℹ️  No existing production deployment metadata found - this appears to be the first deployment"
+          fi
+
+          echo "✅ Deployment freshness validation passed"
+
       - name: Deploy to production S3 bucket
         run: |
           aws s3 cp index.html s3://${{ secrets.PRODUCTION_S3_BUCKET }}/index.html
           echo "✅ Successfully deployed to production bucket: ${{ secrets.PRODUCTION_S3_BUCKET }}"
+
+      - name: Update production deployment metadata
+        run: |
+          # Create production deployment metadata
+          DEPLOYMENT_INFO=$(cat << EOF
+          {
+            "workflow_id": "${{ github.run_id }}",
+            "sha": "${{ github.sha }}",
+            "timestamp": $(date +%s),
+            "workflow_run_number": ${{ github.run_number }},
+            "actor": "${{ github.actor }}",
+            "ref": "${{ github.ref }}",
+            "deployment_time": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+          }
+          EOF
+          )
+
+          echo "$DEPLOYMENT_INFO" | aws s3 cp - s3://${{ secrets.PRODUCTION_S3_BUCKET }}/deployment-metadata.json
+          echo "📝 Updated production deployment metadata"
 
       - name: Output production URL
         run: |
